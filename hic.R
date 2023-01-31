@@ -1,349 +1,158 @@
-install.packages("plotly")
-install.packages("heatmaply")
-install.packages("ggcorrplot")
-install.packages("Rcpp")
-library("heatmaply")
-library("strawr")
-library("HiTC")
+
+# @author : Mª Eugenia Soler (maria.soler@cabimer.es / eusololi@gmail.com)
+# @brief : feature_hic_metaplot.R generates HiC data metaplots around a any feature of interest. The input must be a .hic matrix, the output that comes
+#from applying the Juicer pipeline (Aiden Lab) to a HiC experiment. straw R package from Aiden Lab (https://github.com/aidenlab/straw/tree/master/R)
+#and HiTC package (Servant N, Lajoie BR, Nora EP, Giorgetti L, Chen C, Heard E, Dekker J, Barillot E (2012). “HiTC: Exploration of High-Throughput 'C' 
+#experiments.” Bioinformatics. doi: 10.1093/bioinformatics/bts521. were used to read and process the input.hic file.
+
+#Packages needed:
 library("Matrix")
+library("strawr")
 library("Rcpp")
-install.packages("HiTC")
-remotes::install_github("aidenlab/straw/R")
-if (!requireNamespace("BiocManager", quietly = TRUE))
-  install.packages("BiocManager")
-
-BiocManager::install("Matrix")
-
-##  SCIPEN HAY QUE HACERLO SI O SI PARA EVITAR HERRORES POSTERIORES
+library("HiTC")
 options(scipen=999)
+chromosomes<-c(paste("chr", 1:22, sep="" ))
 
-##Cargamos con straw el subset de la matriz que queramos, con la normalizacion y el tamaño de bin deseado
-hic.data.frame <- strawr::straw("NONE", "ENCFF406HHC.hic", "1", "1", "BP", 10000)
-head(hic.data.frame)
-dim(hic.data.frame)
-##Ordenamos la matriz y miramos la ultima fila para hacernos una idea de cual es el ultimo bin
-sorted_hic.data.frame <- hic.data.frame[order(hic.data.frame$x, hic.data.frame$y),]
-head(sorted_hic.data.frame)
-dim(sorted_hic.data.frame)
-sorted_hic.data.frame[1027960,]
-##Para darle nombre a los bins, como en la matriz por defecto se llaman como el bp final del bin, lo dividimos entre 10000
-##(el tamaño del bin) para tener numeros más pequeños, (1,2,3,4,...)
-bins_x <- sorted_hic.data.frame[,1]/10000
-bins_x[1:10]
-bins_y <- sorted_hic.data.frame[,2]/10000
-bins_y[1:10]
-##Si no, para saber cual es el bin mayor, también podemos hacer esto en lugar de ver la fila 
-max(bins_y)
-
-##Creamos una nueva matriz con los nuevos nombres de las bins, y las counts de la matriz. Esa será nuestra matriz de contacto
-sorted_bins_hic.data.frame <- data.frame(bins_x, bins_y, sorted_hic.data.frame[,"counts"])
-head(sorted_bins_hic.data.frame)
-dim(sorted_bins_hic.data.frame)
-write.table(sorted_bins_hic.data.frame, file="contact_matrix_22.csv", sep = "\t", row.names=FALSE, col.names=FALSE, quote=FALSE)
-
-## Al último bin, le restamos 10000 y lo que nos dé +1 será el último valor de coordenada del start bins
-59110000 - 10000
-start_bins <- seq(1,51220001, by=10000)
-length(start_bins)
-end_bins <- seq(10000,51230000, by=10000)
-bins_name <- seq(1,5123, by=1)
-chr <- rep("chr22", 5123)
-##Hacemos la tabla de coordenadas de los bins
-bins_coordinates <- data.frame (chr, start_bins, end_bins, bins_name)
-is.atomic(sorted_bins_hic.data.frame)
-head(bins_coordinates)
-write.table(bins_coordinates, file="bins_coordinates_22.bed", sep = "\t", row.names=FALSE, col.names=FALSE, quote=FALSE, )
-
-##Importamos la matriz de contacto con la tabla que explica las coordenadas de cada bin
-chr1 <- importC(con="contact_matrix_22.csv" ,  xgi.bed ="bins_coordinates_22.bed", ygi.bed=NULL, allPairwise=FALSE, rm.trans=TRUE)
-CQC(chr16)
-chr1$chr1chr1
-mapC(chr1$chr1chr1)
-
-##Filtramos las coordenadas de la característica que vamos a mirar (en este caso, conflictos CD o HO) por cromosoma
-HO <- read.table(file="Galaxy669-[Cut_on_data_667_HEAD-ON_c4_DRIPc_signal_c5_Rloop_peak_length].tabular")
-head(HO)
-HO_1<-data.frame()
-j <- 1
-for (i in 1:nrow(HO))
+feature_hic_metaplot<- function(hic_input_file, unit, binsize, feature_coordinates_file, margins, metahic_matrix_file)
 {
-  print(i)
-  if (HO[i,1]=="chr22")
+import_matrix<-data.frame()
+xgi_matrix<-data.frame()
+index<-1
+for(i in 1:length(chromosomes)
   {
-  HO_1[j,1] <- HO[i,1]
-  HO_1[j,2] <- (HO[i,3] - HO[i,2])/2 + HO[i,2]
-  j <- j+1
-  }
-}
-head(HO_1)
-dim(HO_1)
-
-
-head(bins_coordinates)
-##Situamos cada coordenada de R loop en su bin correspondiente
-rloop_in_bin <- data.frame()
-k <- 1
-for(i in 1:nrow(HO_1))
-{
-  print(i)
-  for(j in 1:nrow(bins_coordinates))
-  {
-    if ((as.numeric(HO_1[i,2]) >= as.numeric(bins_coordinates[j,2])) && (as.numeric(HO_1[i,2]) <= as.numeric(bins_coordinates[j,3])))
+  #Loading each chromosome matrix, using straw package
+  hic.data.frame <- strawr::straw(norm="NONE", hic_input_file, as.character(i), as.character(i), unit, binsize, matrix="observed") 
+  #Creating a table with the chromosome, coordinates and the names of the bins (xgi_table); 
+  #and a matrix with the bin names and contacts between them (import_matrix)
+  sorted_hic.data.frame <- hic.data.frame[order(hic.data.frame$x, hic.data.frame$y),]
+  start_bins<-seq(1,max(sorted_hic.data.frame$x, sorted_hic.data.frame$y)-9999,by=10000)
+  end_bins<-seq(10000,max(sorted_hic.data.frame$x, sorted_hic.data.frame$y),by=10000)
+  if(i==1)
     {
-      rloop_in_bin[k,1] <- HO_1[i,1]
-      rloop_in_bin[k,2] <- HO_1[i,2]
-      rloop_in_bin[k,3] <- bins_coordinates[j,2]
-      rloop_in_bin[k,4] <- bins_coordinates[j,3]
-      rloop_in_bin[k,5] <- bins_coordinates[j,4]
-      k <- k+1
+    
+    bins_names<-seq(index,length(start_bins), by=1)
     }
-  }
-}
-dim(rloop_in_bin)
-head(rloop_in_bin)
-head(bins_coordinates)
-
-##Creamos una matriz vacía donde se guardarán los datos del meta-HiC
-rloop_matrix <- matrix(nrow=401, ncol=401, 0)
-dim(rloop_matrix_new)
-
-##Para cada Rloop, extraemos y normalizamos sus datos de contacto (cambiando los NA por ceros pa que se puedan sumar)
-##Vamos sumando todos de cada cromosoma, y después lo dividiremos por el número total para calcular la media
-for(i in 1:nrow(rloop_in_bin))
-{
-  print(i)
-  rloop <- extractRegion(chr1$chr21chr21, c(1,2), chr="chr21", from=(rloop_in_bin[i,3]-2000000), to=(rloop_in_bin[i,4]+2000000))
-  rloop_normperexp <- normPerExpected(rloop)
-  rloop_matrix_new <- as.matrix(rloop_normperexp@intdata)
-  rloop_matrix_new[is.na(rloop_matrix_new)] <- 0
-  rloop_matrix <- rloop_matrix + rloop_matrix_new
-}
-rloop_matrix[1:5,1:5]
-
-##Dividmos entre el número total y tenemos la matriz con el valor medio de contactos
-rloop_matrix<- rloop_matrix/74
-write.table(rloop_matrix, file="rloop_cd_metahic_minus.tsv")
-
-
-##Las volvemos a multiplicar por el número total, las de cada cadena, para poder sumarlas
-
-rloop_matrix_plus <- read.table(file="rloop_cd_metahic_plus.tsv")
-rloop_matrix_plus <- rloop_matrix_plus*69
-
-rloop_matrix_minus <- read.table(file="rloop_cd_metahic_minus.tsv")
-rloop_matrix_minus <- rloop_matrix_minus*74
-
-##Hacemos una cosa loquísima que no sé ni como sale pero sale, para invertir las matrices y poder sumarlas
-rloop_matrix_minus_new <- matrix(nrow=401, ncol=401)
-j <- 401
-for(i in 1:ncol(rloop_matrix_minus))
-{
-  print(i)
-  rloop_matrix_minus_new[,j]<-rev(rloop_matrix_minus[,i])
-  j <- j-1
-}
-rloop_matrix_minus[1:5,1:5]
-rloop_matrix_minus_new[397:401,397:401]
-test2 <- t(rloop_matrix_minus_new)
-test2[397:401,397:401]
-write.table(rloop_matrix_minus_new, file="rloop_ho_metahic_minus_good.tsv") ##Esta es la matriz invertida de la cadena -, para poder sumarla a la +
-
-
-rloop_matrix_both <- test2+rloop_matrix_plus ##Sumamos la matriz invertida (-) a la positiva (+)
-rloop_matrix_both <- rloop_matrix_both/143 ##Dividimos entre el número total de regiones (+ y -)
-
-write.table(rloop_matrix_both, file="rloop_cd_metahic_both.tsv")
-
-##FC
-##Cargamos las dos matrices
-ho <- read.table("rloop_ho_metahic_both.csv", sep=";", header=TRUE)
-dim(ho)
-ho<-ho[,2:402]
-ho[1:5,1:5]
-cd <- read.table(file="rloop_cd_metahic_both.csv",sep=";", header=TRUE)
-dim(cd)  
-cd<-cd[,2:402]
-cd[1:5,1:5]
-ho <- as.matrix(ho)
-cd <- as.matrix(cd)
-
-fold <- ho/cd
-fold[1:5,1:5]
-log2fold <- log2(fold)
-log2fold[1:5,1:5]
-
-write.table(log2fold, file="log2fold_metahic_hovscd.csv", sep=",", row.names = TRUE, col.names = TRUE)
-
-##Sacar regiones especificas
-HO <- read.table(file="Galaxy771-[Cut_on_data_766_CD_CONFLICTS_c4_DRIPc_intensity_c5_length_c6_strand].bed")
-chr1 <- importC(con="contact_matrix_11.csv" ,  xgi.bed ="bins_coordinates_11.bed", ygi.bed=NULL, allPairwise=FALSE, rm.trans=TRUE)
-HO[276,]
-rloop <- extractRegion(chr1$chr11chr11, c(1,2), chr="chr11", from=(HO[276,2]-2000000), to=(HO[276,3]+2000000))
-rloop_normperexp <- normPerExpected(rloop)
-rloop_matrix_new <- as.matrix(rloop_normperexp@intdata)
-rloop_matrix_new[is.na(rloop_matrix_new)] <- 0
-rloop_matrix_new[1:5,1:5]
-write.table(rloop_matrix_new, file="CD_276.csv", sep=",", row.names=TRUE, col.names=TRUE)
-mapC(rloop_normperexp,minrange=0, maxrange=1.5, col.pos=c("blue", NA , "red"), col.na="black")
-#####################################################################################################
-##Con las matrices iced del paper Barutcu et al smarca4
-##leemos la matriz, vemos cual es el ultimo bin, la rehacemos para quitar los nombres de filas y columnas, y viendo las bins creamos
-##la tabla de coordenadas
-chr <- read.table(file="HiCStein-MCF10a-shBRG1__hg19__chr1__C-40000-iced.matrix", sep="\t")
-  dim(chr)
-chr[1:5,1:5]
-chr[3883,1]
-chr <- chr[2:6081,2:6081]
-start_bins <- seq(1,155240001, by=40000)
-length(start_bins)
-155240001+40000
-end_bins <- seq(40000,155280001, by=40000)
-length(end_bins)
-bins_name <- seq(1,3882, by=1)
-chr <- rep("chrX", 3882)
-
-bins_coordinates <- data.frame (chr, start_bins, end_bins, bins_name)
-head(bins_coordinates)
-write.table(bins_coordinates, file="bins_coordinates_chrX_40kb.bed", sep = "\t", row.names=FALSE, col.names=FALSE, quote=FALSE, )
-
-##Filtramos las coordenadas de la característica que vamos a mirar (en este caso, conflictos CD o HO) por cromosoma
-bins_coordinates <- read.table(file="bins_coordinates_chr1_40kb.bed")
-head(bins_coordinates)
-HO <- read.table(file="brg1_rloopgain_hg19.bed")
-head(HO)
-HO_1<-data.frame()
-j <- 1
-for (i in 1:nrow(HO))
-{
-  print(i)
-  if (HO[i,1]=="chrX")
-  {
-      if (HO[i,6]=="+")
+  else
+    {
+     index<-index+nrow(bins_coordinates)+1
+     bins_names<-seq(index,length(start_bins)+index-1, by=1)
+    }
+  bin1<-as.vector(sorted_hic.data.frame[,1])
+  bin2<-as.vector(sorted_hic.data.frame[,2])
+  bin1_name<-c()
+  bin2_name<-c()
+  m<-1
+  for(j in 1:nrow(sorted_hic.data.frame))
+    {
+    if(bin1[j]==0)
       {
-    HO_1[j,1] <- HO[i,1]
-    HO_1[j,2] <- (HO[i,3] - HO[i,2])/2 + HO[i,2]
-    j <- j+1
-    }
+      sorted_hic.data.frame<-sorted_hic.data.frame[-j,]
+      }
+    else
+      {
+      bin1_name[m]<-bins_names[which(end_bins==bin1[j])]
+      bin2_name[m]<-bins_names[which(end_bins==bin2[j])]
+      m<-m+1 
+      }
   }
+  bins<-cbind(rep(i, length(length(start_bins))),start_bins, end_bins, bins_names)
+  sorted_hic.data.frame <-cbind(bin1_name, bin2_name,sorted_hic.data.frame[,3],)
+  #Adding the information of new chromosome to import_matrix and xgi_table
+  import_matrix <- rbind(import_matrix, sorted_hic.data.frame)
+  xgi_table <- rbind(xgi_matrix, bins)
 }
-head(HO_1)
-dim(HO_1)
 
-write.table(HO_1, file="brg1gain_chrX_plus_hg19.bed", sep = "\t", row.names=FALSE, col.names=FALSE, quote=FALSE, )
-##Situamos cada coordenada de R loop en su bin correspondiente
-    ##Creamos una matriz vacía donde se guardarán los datos del meta-HiC
-    rloop_matrix <- matrix(nrow=101, ncol=101, 0)
-    dim(rloop_matrix)
+matrix<-importC(import_matrix , xgi_matrix, ygi.bed=NULL, allPairwise=FALSE, rm.trans=TRUE)
+rm(import_matrix)
+feature_coordinates<-read.table(file=feature_coordinates_file)
+feature_coordinates <- feature_coordinates[order(feature_coordinates[,1], feature_coordinates[,2], feature_coordinates[,3]),]
 
-chr <- read.table(file="HiCStein-MCF10a-shBRG1__hg19__chrX__C-40000-iced.matrix")
-dim(chr)
-chr <- chr[2:nrow(chr),2:nrow(chr)]
-chr[1:5,1:5]
-bins_coordinates <- read.table(file="bins_coordinates_chrX_40kb.bed")
-HO_1 <- read.table(file="brg1gain_chrX_plus_hg19.bed", sep="\t")
-head(HO_1)
-rloop_in_bin <- data.frame()
-k <- 1
-for(i in 1:nrow(HO_1))
+##feature midpoint calculation and place of the features in its corresponding bin
+midpoint<-c()
+for(i in 1:nrow(feature_coordinates))
 {
-  print(i)
-  for(j in 1:nrow(bins_coordinates))
+midpoint[i]<-(feature_coordinates[i,3]-feature_coordinates[i,2])/2 + feature_coordinates[i,2]
+}
+midpoint_dataframe<-cbind(feature_coordinates[,1], midpoint, feature_coordinates[,4:6])
+
+feature_in_bin<-data.frame()
+m <- 1
+for(i in 1:length(chromosomes))
+{
+ chr_bins<-subset(xgi_matrix, xgi_matrix[,1]==chromosomes[i])
+ chr_feature<-subset(midpoint_dataframe, midpoint_dataframe[,1]==chromosomes[i])
+ if(nrow(chr_feature)>1)
   {
-    if ((as.numeric(HO_1[i,2]) >= as.numeric(bins_coordinates[j,2])) && (as.numeric(HO_1[i,2]) <= as.numeric(bins_coordinates[j,3])))
+  for(j in 1:nrow(chr_feature))
     {
-      rloop_in_bin[k,1] <- HO_1[i,1]
-      rloop_in_bin[k,2] <- HO_1[i,2]
-      rloop_in_bin[k,3] <- bins_coordinates[j,2]
-      rloop_in_bin[k,4] <- bins_coordinates[j,3]
-      rloop_in_bin[k,5] <- bins_coordinates[j,4]
-      k <- k+1
+    for(k in 1:nrow(chr_bins))
+      {
+      if ((as.numeric(chr_feature[j,2]) >= as.numeric(chr_bins[k,2])) && (as.numeric(chr_feature[j,2]) <= as.numeric(chr_bins[k,3])))
+        {
+        feature_in_bin[m,1]<-as.character(chr_feature[j,1])
+        feature_in_bin[m,2]<-as.numeric(chr_feature[j,2])
+        feature_in_bin[m,3:5]<-as.numeric(chr_bins[k,2:4])
+        feature_in_bin[m,6]<-as.character(chr_feature[j,5])
+        m<-m+1
+        }
+      }
     }
   }
 }
-dim(rloop_in_bin)
-head(rloop_in_bin)
-head(bins_coordinates)
-
-##Para cada Rloop, extraemos y normalizamos sus datos de contacto (cambiando los NA por ceros pa que se puedan sumar)
-##Vamos sumando todos de cada cromosoma, y después lo dividiremos por el número total para calcular la media
-k<- 0
-for(i in 1:nrow(rloop_in_bin))
+##Creating two meta-HiC-matrices, depending on the strand of the feature
+rloop_matrix_plus <- matrix(nrow=(margins/binsize)*2+1, ncol=(margins/binsize)*2+1, 0)
+rloop_matrix_minus <- matrix(nrow=(margins/binsize)*2+1, ncol=(margins/binsize)*2+1, 0)
+##In each feature coordinates +- the margins selected, extraction and normalization (o/e) of its contacts data.
+htclist<-do.call(c, matrix)
+rm(matrix)
+m<-0
+n<-0
+for(i in 1:22)
 {
-  print(i)
-    if((rloop_in_bin[i,5]>50)&&((rloop_in_bin[i,5]+50)<max(bins_coordinates[,4])))
+print(i)
+chr_bins<-subset(xgi_matrix, xgi_matrix[,1]==chromosomes[i])
+chr_feature<-subset(feature_in_bin, feature_in_bin[,1]==chromosomes[i])
+for(j in 1:nrow(chr_feature))
+  {
+   print(j)
+   if((chr_feature[j,3]-margins)>0 && chr_feature[j,4]<max(chr_bins[,2:3]))
     {
-  bin <- rloop_in_bin[i,5]
-  rloop <- chr[(bin-50):(bin+50), (bin-50):(bin+50)]
-  rloop_matrix_new <- apply(rloop, 2, as.numeric)
-  rloop_matrix_new[is.na(rloop_matrix_new)] <- 0
-  rloop_matrix <- rloop_matrix + rloop_matrix_new
-  k <- k+1
+    rm(rloop)      
+    rloop <- extractRegion(htclist[[i]], c(1,2), chr=chr_feature[j,1], from=(chr_feature[j,3]-margins), to=(chr_feature[j,4]+margins))
+    rm(rloop_normperexp)
+    rloop_normperexp <- normPerExpected(rloop)
+    rm(rloop_matrix_new)
+    rloop_matrix_new <- as.matrix(rloop_normperexp@intdata)
+    rloop_matrix_new[is.na(rloop_matrix_new)] <- 0
+    if(nrow(rloop_matrix_new)==(margins/binsize)*2+1 && ncol(rloop_matrix_new)==(margins/binsize)*2+1)
+      {
+      if(feature_in_bin[j,6]=="+")
+        {
+        rloop_matrix_plus <- rloop_matrix_plus + rloop_matrix_new
+        m<-m+1
+        }
+      else
+        {
+        rloop_matrix_minus <- rloop_matrix_minus + rloop_matrix_new
+        n<-n+1
+        }
+      }
+    }
   }
 }
-k
-rloop_matrix[1:5,1:5]
-rloop_matrix_new[1:5,1:5]
-dim(rloop_matrix)
-rloop_in_bin[5,]
-dim(bins_coordinates)
-bins_coordinates[3530,]
-##Dividmos entre el número total y tenemos la matriz con el valor medio de contactos
 
-130+78+70+30+42+66+77+36+53+44+98+56+15+37+48+94+86+7+150+28+16+53+35 ##brg1 gain 1349
-
-72+56+70+51+69+92+46+47+18+36+39+37+16+41+32+25+19+20+18+8+11+12+22 ##ho - 857
-
-13+19+11+6+9+13+6+7+12+7+10+2+5+15+2+5+11+4+6+5+3+3+4  ##cd + 178
-rloop_matrix<- rloop_matrix/1349
-write.table(rloop_matrix, file="rloop_brg1gain_plus_shbrg1_metahic_hg19_log10.tsv", sep="\t")
-rloop_matrix<- log10(rloop_matrix)
-
-
-##Las volvemos a multiplicar por el número total, las de cada cadena, para poder sumarlas
-
-rloop_matrix_wt <- read.table(file="rloop_brg1gain_plus_shbrg1_metahic_hg19.tsv")
-rloop_matrix_brg1 <-read.table(file="rloop_brg1gain_plus_shscram_metahic_hg19.tsv") 
-
-rloop_matrix_minus <- read.table(file="rloop_cd_metahic_minus.tsv")
-rloop_matrix_minus <- rloop_matrix_minus*74
-
-##Hacemos una cosa loquísima que no sé ni como sale pero sale, para invertir las matrices y poder sumarlas
-rloop_matrix_minus_new <- matrix(nrow=401, ncol=401)
-j <- 401
+##Invertion of the minus strand matrix in order to calculate the average of plus and minus features HiC maps together
+rloop_matrix_minus_new <- matrix(nrow=(margins/binsize)*2+1, ncol=(margins/binsize)*2+1, 0)
+j <- nrow(rloop_matrix_minus_new)
 for(i in 1:ncol(rloop_matrix_minus))
-{
-  print(i)
+  {
   rloop_matrix_minus_new[,j]<-rev(rloop_matrix_minus[,i])
   j <- j-1
+  }
+t_matrix_minus_new <- t(rloop_matrix_minus_new)
+#Average calculation
+rloop_matrix_both <- t_matrix_minus_new+rloop_matrix_plus 
+rloop_matrix_both <- rloop_matrix_both/(m+n) ##Dividimos entre el número total de regiones (+ y -)
+#Output file
+write.table(rloop_matrix_both, file=metahic_matrix_file, quote=FALSE, sep=",")
 }
-rloop_matrix_minus[1:5,1:5]
-rloop_matrix_minus_new[397:401,397:401]
-test2 <- t(rloop_matrix_minus_new)
-test2[397:401,397:401]
-write.table(rloop_matrix_minus_new, file="rloop_ho_metahic_minus_good.tsv") ##Esta es la matriz invertida de la cadena -, para poder sumarla a la +
-
-
-rloop_matrix_both <- test2+rloop_matrix_plus ##Sumamos la matriz invertida (-) a la positiva (+)
-rloop_matrix_both <- rloop_matrix_both/143 ##Dividimos entre el número total de regiones (+ y -)
-
-write.table(rloop_matrix_both, file="rloop_cd_metahic_both.tsv")
-
-##FC
-##Cargamos las dos matrices
-ho <- read.table("rloop_brg1gain_plus_shbrg1_metahic_hg19_log10.tsv", sep="\t", header=TRUE)
-dim(ho)
-ho<-ho[,2:402]
-ho[1:5,1:5]
-cd <- read.table(file="rloop_brg1gain_plus_shscram_metahic_hg19_log10.tsv",sep="\t", header=TRUE)
-dim(cd)  
-cd<-cd[,2:402]
-cd[1:5,1:5]
-ho <- as.matrix(ho)
-cd <- as.matrix(cd)
-
-fold <- ho/cd
-fold[1:5,1:5]
-log2fold <- log2(fold)
-log2fold[1:5,1:5]
-
-write.table(log2fold, file="log2fold_metahic_brg1gain_brg1vswt_log10.tsv", sep="\t", row.names = TRUE, col.names = TRUE)

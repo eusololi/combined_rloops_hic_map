@@ -1,0 +1,21 @@
+For running feature_hic_metaplot.R from the terminal:
+
+1. Open R from the terminal.
+2. source("feature_hic_metaplot.R")
+3. codfinder(hic_input_file="path/to/hic_input_file",  unit, binsize, feature_coordinates_file="path/to/feature_coordinates_file", 
+margin, feature_metahic_file="path/to/feature_metahic_file)
+
+
+inputs related to strawr function from straw package (https://github.com/aidenlab/straw/tree/master/R)
+1. hic_input_file: .hic file, as it comes from Juicer pipeline (Aiden Lab)
+2. unit: base pairs ("BP") or fragment ("FRAG")
+3. The bin size. By default, for BP, this is one of <2500000, 1000000, 500000, 250000, 100000, 50000, 25000, 10000, 5000> and for
+FRAG this is one of <500, 200, 100, 50, 20, 5, 2, 1>.
+
+other inputs:
+1. feature_coordinates_file: a BED file containing the coordinates of your feature of interest
+2. margins: in base pairs, distance surrounded the bin that contain the feature you want to plot. If margins=20000000 (20 Mb), the hic metaplot
+will contain the average of o/e contacts +-20 Mb around the feature of interest.
+
+Output: the metahic matrix file (.csv format), that contains in each bin the average o/e contacts of all the subsetted hi-c matrices around
+the feature coordinates. This file can be open directly in Gitools (version 2.3.0)
